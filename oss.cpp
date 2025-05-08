@@ -1,6 +1,6 @@
 //Written by Yosef Alqufidi
-//Date 4/29/25
-//updated from project 4
+//Date 5/15/25
+//updated from project 5
 
 
 #include <iostream>
@@ -15,34 +15,41 @@
 #include <sys/shm.h>
 #include <ctime>
 #include <string>
-#include <functional>
 #include <vector>
 #include <sys/msg.h>
 #include <algorithm>
-#include <errno.h>
 
 using namespace std;
 
 //PCB tracking children
 
 #define PROCESS_TABLE 20
-#define MAX_RESOURCES 5
-#define INSTANCES_PER_RESOURCE 10
+#define MAX_PROCESSES 18
 
-enum RequestType { 
-	REQUEST = 0, 
-	RELEASE = 1, 
-	RELEASE_ALL = 2 
+//32k per process
+#define PAGES_PER_PROCESS 32
+
+//frame table
+#define FRAME_COUNT 256
+#define PAGE_SIZE 1024
+
+//14ms
+#define DISK_TIME_NS (14LL * 1000000LL)
+
+enum MsgType { 
+	REQUEST_MEMORY = 1, 
+	TERMINATE = 2
 };
 
 //struct for PCB
 struct PCB{
-	int occupied;
+	BOOL occupied;
 	pid_t pid;
 	int startSeconds;
 	int startNano;
-	int messagesSent;
-	int alloc[MAX_RESOURCES];
+	int accesses;
+	int faults;
+	int pageTable[PAGES_PER_PROCESS];
 };
 
 //struct for clock
@@ -55,37 +62,72 @@ struct ClockDigi{
 struct Message{
 	long mtype;
 	pid_t pid;
-	int type;
-	int resID;
+	int address;
+	bool write;
 };
 
-struct Resource{
-	int available;
-	pid_t waitQueue[PROCESS_TABLE];
-	int waitCount;
+struct Frame{
+	bool occupied;
+	pid_t pid;
+	int page;
+	bool dirty;
+	int lastRfSec;
+	int lastRefNano;
+};
+
+struct Fault{
+	pid_t pid;
+	int page;
+	bool write;
+	int reqSec;
+	int reqNano;
 };
 
 static PCB processTable[PROCESS_TABLE];
-static Resource resources[MAX_RESOURCES];
-static int waitingFor[PROCESS_TABLE];
+static Frame frameTable[FRAME_COUNT];
+static queue<Fault> faultQueue;
 //clock ID
 static int shmid;
 //shared memory ptr
-static ClockDigi* clockVal = nullptr;
+static ClockDigi* clockVal;
 //message ID
 static int msgid;
 
 static ofstream logFile;
 
-int findIndex(pid_t pid){
-	for(int i=0;i<PROCESS_TABLE;i++){
-		if(processTable[i].occupied && processTable[i].pid == pid) 
-			return i;
+void advanceClock(long long deltaNs){
+	long long total = (long long) clockVal->sysClockS * 1000000000LL + clockVal->sysClockNano + deltaNs;
+	clockVal->sysClockS = total / 1000000000LL;
+	clockVal->sysClockNano = total % 1000000000LL;
+}
+
+int allocateFrame(pid_t pid, int page){
+	for(int i=0; i<FRAME_COUNT; i++){
+		if(!frameTabel[i].occupied){
+			frameTable[i] ={
+				true,
+				pid,
+				page,
+				false,
+				clockVal->sysClockS,
+				clockVal->sysClockNano
+			};
+			returni;
+		}
 	}
 
-	return -1;
-	
+//LRU	
+int lruIdx = 0;
+long long lruTime = (long long) frameTable[0].lastRefSec * 1000000000LL + frameTable[0].lastRefNano;
+for(int i = 1; <FRAME_COUNT; i++){
+       long long t = (long long) frameTable[i].lastRefSec * 10000000000LL + frameTable[i].lastRefNano;
+	if(t < lruTime){
+	 lruTime = t;
+	 lruIdx = i;
+	}
 }
+
+
 
 //print process table to screen and logfile
 void printProcessTable(){
