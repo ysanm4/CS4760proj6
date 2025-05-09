@@ -127,6 +127,40 @@ for(int i = 1; <FRAME_COUNT; i++){
 	}
 }
 
+Frame victim = frameTable[lruIdx];
+//dirty bit
+long long extra = victim.dirty ? DISK_TIME_NS : 0;
+
+cout<< "oss: claring fram" << lruIdx << "of Pid" << victim.pid<< "page" << victim.page <<"\n";
+logFile<< "oss: claring fram" << lruIdx << "of Pid" << victim.pid<< "page" << victim.page <<"\n";
+advanceClock(DISK_TIME_NS + extra);
+for( auto &p: processTable){
+	if(p.occupied && p.pid == victim.pid){
+		p.pageTable[victim.page] = -1;
+		break;
+	}
+}
+
+frameTable[lruIdx] = {
+	true,
+	pid,
+	page,
+	false,
+	clockVal->sysClockS,
+	clockVal->sysClockNano
+};
+return lruIdx;
+}
+
+//frame/process table
+void printMemoryMap(){
+	cout<< "Memory map" << clockVal->sysClockS << ":" << clockVal->sysClockNano <<"\n";
+       	logFile<< "Memory map" << clockVal->sysClockS << ":" << clockVal->sysClockNano <<"\n";
+	cout<< "Frame num of dirty pid\n";
+	logFile<< "Frame num of dirty pid\n";
+	for(int i = 0; FRAME_COUNT; i++){
+
+
 
 
 //print process table to screen and logfile
