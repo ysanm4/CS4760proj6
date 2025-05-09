@@ -159,110 +159,63 @@ void printMemoryMap(){
 	cout<< "Frame num of dirty pid\n";
 	logFile<< "Frame num of dirty pid\n";
 	for(int i = 0; FRAME_COUNT; i++){
+		cout<< i <<" "<< (frameTable[i].occupied?"y":"n")<<" "<<(frameTable[i].dirty?"1":"0")<<" "
+			<<frameTable[i].lastRefSec<<" "<<frameTable[i].lastRefNano<<" "
+			<<frameTable[i].pid<<" "<<frameTable[i].page<<"\n";
+	}
 
-
+	for(int i = 0; i<PROCESS_TABLE; i++){
+		if(processTable[i].occupied){
+			cout<<"pid"<<processTable[i].pid<<" process table:";
+			logFile<<"pid"<<processTable[i].pid<<" process table:";
+			for(int pg = 0; pg<PAGES_PER_PROCESS; pg++){
+				cout<<processTable[i].pageTable[pg] <<(pg + 1<PAGES_PER_PROCESS?" ":"\n");
+				logFile<<processTable[i].pageTable[pg] <<(pg + 1<PAGES_PER_PROCESS?" ":"\n");
+			}
+		}
+	}
+}
 
 
 //print process table to screen and logfile
 void printProcessTable(){
 	cout<<"Process Table:-------------------------------------------------------------------------------\n";
-	cout<<"Entry\tOccupied\tPID\tStartS\tStartN\tMessagesSent\n";
+	cout<<"Entry\tOccupied\tPID\tStartS\tStartN\tAccesses\tFaults\n";
 	logFile<<"Process Table::-------------------------------------------------------------------------------\n";
-	logFile << "Entry\tOccupied\tPID\tStartS\tStartN\tMessagesSent\n";
+	logFile << "Entry\tOccupied\tPID\tStartS\tStartN\tAccesses\tFaults\n";
     for (int i = 0; i < PROCESS_TABLE; i++) {
-	    if(!processTable[i].occupied) continue;
+	    if(!processTable[i].occupied){
         cout << i << "\t" << processTable[i].occupied << "\t\t"
              << processTable[i].pid << "\t"
              << processTable[i].startSeconds << "\t"
              << processTable[i].startNano << "\t"
-             << processTable[i].messagesSent << "\n";
+             << processTable[i].accesses << "\n";
+	     << processTable[i].faults << "\n";
         logFile << i << "\t" << processTable[i].occupied << "\t\t"
                 << processTable[i].pid << "\t"
                 << processTable[i].startSeconds << "\t"
                 << processTable[i].startNano << "\t"
-                << processTable[i].messagesSent << "\n";
-	for(int r = 0; r < MAX_RESOURCES; r++){
-		cout << " " << processTable[i].alloc[r];
-		logFile << " " << processTable[i].alloc[r];
-
-    }
+                << processTable[i].accesses << "\n";
+		<< processTable[i].faults << "\n";
     cout << "\n";
     logFile << "\n";
-}
-}
 
-void printResourceTable(){
-	cout << "Resource Table:----------------------------------------------------------------------------------\n";
-	cout << "ResID available WaitingCount\n";
-    logFile << "Resource Table:------------------------------------------------------------------------------------\n";
-    logFile << "ResID available WaitingCount\n";
-    for(int r = 0; r < MAX_RESOURCES; r++) {
-        cout << "R" << r << ": available=" << resources[r].available
-             << " waiting=" << resources[r].waitCount << "\n";
-        logFile << "R" << r << ": available=" << resources[r].available
-                << " waiting=" << resources[r].waitCount << "\n";
+	    }
     }
 }
+
 
 //cleanup
 void cleanup(int) {
     //send kill signal to all children based on their PIDs in process table
-for(int i = 0; i < PROCESS_TABLE; i++){
-	if(processTable[i].occupied) 
-		kill(processTable[i].pid, SIGKILL);
-}
-
+for(auto &p:processTable)
+	if(p.occupied) kill(p.pid,SIGKILL);
 //free up shared memory
 if(clockVal) shmdt(clockVal);
 shmctl(shmid, IPC_RMID, NULL);
 msgctl(msgid, IPC_RMID, NULL);
 if(logFile.is_open()) logFile.close();
-    exit(1);
-}
-
-// Deadlock detection
-vector<int> detectDeadlock() {
-    
-    vector<vector<int>> graph(PROCESS_TABLE);
-    for(int i = 0; i < PROCESS_TABLE; i++) {
-        if(processTable[i].occupied && waitingFor[i] != -1) {
-            int res = waitingFor[i];
-            for(int j = 0; j < PROCESS_TABLE; j++) {
-                if(processTable[j].occupied && processTable[j].alloc[res] > 0) {
-                    graph[i].push_back(j);
-                }
-            }
-        }
-    }
-    vector<bool> visited(PROCESS_TABLE), rec(PROCESS_TABLE);
-    vector<int> cycle;
-    function<bool(int)> dfs = [&](int u) {
-        visited[u] = rec[u] = true;
-        for(int v : graph[u]) {
-            if(!visited[v]) {
-                if(dfs(v)) { 
-			if(cycle.empty()) cycle.push_back(u); 
-			return true; 
-		}
-            } else if(rec[v]) {
-                cycle.push_back(u);
-                return true;
-            
-        
-	}
-    }
-        rec[u] = false;
-        return false;
-    };
-    for(int i = 0; i < PROCESS_TABLE; i++) {
-        if(processTable[i].occupied && waitingFor[i] != -1) {
-            fill(visited.begin(), visited.end(), false);
-            fill(rec.begin(), rec.end(), false);
-            cycle.clear();
-            if(dfs(i)) return cycle;
-        }
-    }
-    return {};
+    exit(0);
 }
 
 
