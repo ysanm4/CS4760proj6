@@ -296,22 +296,6 @@ shmid = shmget(key, sizeof(ClockDigi), IPC_CREAT | 0666);
 	clockVal->sysClockS = 0;
 	clockVal->sysClockNano = 0;
 
-for(int i = 0; i < PROCESS_TABLE; i++) {
-        processTable[i].occupied = 0;
-        processTable[i].pid = 0;
-        processTable[i].startSeconds = 0;
-        processTable[i].startNano = 0;
-        processTable[i].messagesSent = 0;
-	waitingFor[i] = -1;
-        fill(begin(processTable[i].alloc),
-		       	end(processTable[i].alloc),
-		       	0);
-    }
-//init resources
-    for(int r = 0; r < MAX_RESOURCES; r++) {
-        resources[r].available = INSTANCES_PER_RESOURCE;
-        resources[r].waitCount = 0;
-    }
 //message queue
     msgid = msgget(key, IPC_CREAT | 0666);
 
@@ -319,160 +303,129 @@ for(int i = 0; i < PROCESS_TABLE; i++) {
     signal(SIGALRM, cleanup);
     alarm(5);
 
+    for(int j=0;j<PROCESS_TABLE;j++) processTable[j] = {false,0,0,0,0,{}};
+    for(int j=0;j<FRAME_COUNT;j++) frameTable[j] = {false,0,0,false,0,0};
+
+
     int launched = 0;
     int running = 0;
     long long lastLaunch = 0;
-    long long lastPrint = 0;
-    long long lastDetect = 0;
-    
-    const long long incNs = 10LL * 1000000LL;     
-    const long long halfSec = 500LL * 1000000LL;  
-    const long long oneSec = 1000LL * 1000000LL;  
+    long long lastPrint = 0; 
 
 //main loop
 while(launched < n_case || running > 0){
-    long long totalNs = (long long)clockVal->sysClockS * 1000000000LL + clockVal->sysClockNano + incNs;
-    clockVal->sysClockS = totalNs / 1000000000LL;
-    clockVal->sysClockNano = totalNs % 1000000000LL;
     long long now = (long long)clockVal->sysClockS * 1000000000LL + clockVal->sysClockNano;
-	
 	pid_t pid;
-        while((pid = waitpid(-1, nullptr, WNOHANG)) > 0) {
-            int idx = findIndex(pid);
-            if(idx >= 0) {
+        while((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
 //free
-                for(int r = 0; r < MAX_RESOURCES; r++) {
-                    resources[r].available += processTable[idx].alloc[r];
-                    processTable[idx].alloc[r] = 0;
-                }
-                processTable[idx].occupied = 0;
-                waitingFor[idx] = -1;
+                for(int k = 0; k < PROCESS_TABLE; k++) {
+			if(processTable[k].occupied && processTable[k].pid == pid){
+				long long totalTime = now - ((long long)processTable[k].startSec * 1000000000LL + processTable[k].startNano);
+				cout<< "pid" << pid << "done runnitime = " << totalTime << " ns accesses = " << processTable[k].accesses << " faults = " << processTable[k].faults << "\n";
+				logFile<< "pid" << pid << "done runnitime = " << totalTime << " ns accesses = " << processTable[k].accesses << " faults = " << processTable[k].faults << "\n";
+				
+                processTable[k].occupied = false;
                 running--;
+		break;
             }
         }
+	}
 
 //fork and exec	
 	if(launched < n_case && running < s_case && now - lastLaunch >= (long long)i_case * 1000000LL) {
             pid = fork();
-            if(pid < 0) {
-                perror("fork"); cleanup(0);
-            } else if(pid == 0) {
-                execlp("./worker", "worker", nullptr);
-                perror("execlp"); exit(EXIT_FAILURE);
+            if(pid == 0) {
+                execlp("./worker", "worker", NULL);
+                perror("exec"); exit(1);
             } else {
 //register pcb
-                for(int i = 0; i < PROCESS_TABLE; i++) {
-                    if(!processTable[i].occupied) {
-                        processTable[i].occupied = 1;
-                        processTable[i].pid = pid;
-                        processTable[i].startSeconds = clockVal->sysClockS;
-                        processTable[i].startNano = clockVal->sysClockNano;
+                for(int k = 0; k < PROCESS_TABLE; k++) {
+                    if(!processTable[k].occupied) {
+                        processTable[k] = {
+				true,
+				pid,
+				clockVal->sysClockS,
+				clockVal->sysClockNano,
+				0,0.
+				{
+				}
+			};
+			launched++;
+			running++;
+			lastLaunched= now;
                         break;
                     }
                 }
-                launched++;
-                running++;
-                lastLaunch = now;
             }
         }
 
-//message handleing
-	Message msg;
-        while(true){
-		ssize_t sz = msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), 0, IPC_NOWAIT);
+	if(!faultQueue.empty()){
+		Fault f = faultQueue.front();
+		long long elapsed = now - ((long long) f.reqSec * 1000000000LL + f.reqNano);
+		if(elapsed >= DISK_TIME_NS + (frameTable[f.pif % FRAME_COUNT].dirty? DISK_TIME_NS:0)){
+			faultQueue.pop();
+			int frameIdx = allocateFrame(f.pid, f.page);
+			for(auto &p : processTable){
+				if(p.occupied && p.pid == f.pid){
+					p.pageTable[f.page] = frameIdx;
+					break;
+				}
+			}
+			Message wake = {
+				f.pid,
+				f.pid, 
+				0,
+				false
+			};
+			msgsnd(msgid,&wake, sizeof(wake) - sizeof(long), 0);
+		}
+	}	
 
-		if(sz < 0){
-			if (errno == ENOMSG) break;
-			perror("msgrcv");
+			
+//message handleing
+Message msg;
+while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT) > 0){
+	for(auto &p : processTable){
+		if(p.occupied && p.pid == msg.pid){
+			p.accesses++;
+			int page = msg.address / PAGE_SIZE;
+			int frm = p.pageTable[page];
+			if(frm >= 0){
+				frameTable[frm].lastRefSec = clockVal->sysClockS;
+				frameTable[frm].lastRefNano = clockVal->sysClockNano;
+				if(msg.write) frameTable[frm].dirty = true;
+				advanceClock(100);
+				Message ack = {
+					msg.pid,
+					msg.pid,
+					0,
+					false
+				};
+				msgsnd(msgid, &ack, sizeof(ack) - sizeof(long),0);
+			}else{
+				p.faults++;
+				faultQueue.push({
+						msg,pid,
+						page,
+						msg.write,
+						clockVal->sysClockS,
+						clockVal->sysClockNano
+						});
+			}
 			break;
 		}
-		int idx = findIndex(msg.pid);
-		if(idx < 0) continue;
-
-            if(msg.type == REQUEST) {
-                if(resources[msg.resID].available > 0) {
-                    resources[msg.resID].available--;
-                    processTable[idx].alloc[msg.resID]++;
-                    waitingFor[idx] = -1;
-//grant
-			Message rep{
-	    msg.pid, msg.pid, REQUEST, msg.resID};
-	    
-	   		msgsnd(msgid, &rep, sizeof(rep) - sizeof(long), 0);
-			processTable[idx].messagesSent++;
-		}else{
-			int q = resources[msg.resID].waitCount++;
-			resources[msg.resID].waitQueue[q] = msg.pid;
-			waitingFor[idx] = msg.resID;
-		}
-	    }else if(msg.type == RELEASE){
-    resources[msg.resID].available++;
-    processTable[idx].alloc[msg.resID]--;
-	    
-	   }else if(msg.type == RELEASE_ALL){
-	       for(int r = 0; r < MAX_RESOURCES; ++r){
-	    resources[r].available += processTable[idx].alloc[r];
-	    processTable[idx].alloc[r] = 0;
-	       }
-   waitingFor[idx] = -1;
-	   }
-	}   
-
-	for(int r = 0; r < MAX_RESOURCES; r++){
-		Resource &res = resources[r];
-		while(res.waitCount > 0 && res.available > 0){
-			pid_t wpid = res.waitQueue[0];
-
-			for(int k = 1; k < res.waitCount; k++)
-				res.waitQueue[k-1] = res.waitQueue[k];
-			res.waitCount--;
-			res.available--;
-			int widx = findIndex(wpid);
-			if(widx >= 0){
-			processTable[widx].alloc[r]++;
-			Message rep{wpid, wpid, REQUEST, r};
-			msgsnd(msgid, &rep, sizeof(rep) - sizeof(long), 0);
-			processTable[widx].messagesSent++;
-			}
-		}
 	}
-
-	if(now - lastPrint >= halfSec){
-		cout << "OSS PID " << getpid() << " SysClock "
-                 << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
-            logFile << "OSS PID " << getpid() << " SysClock "
-                    << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
-            printProcessTable();
-            printResourceTable();
-            lastPrint = now;
-        }
-
-	if(now - lastDetect >= oneSec) {
-            vector<int> cycle = detectDeadlock();
-            if(!cycle.empty()) {
-//choose pid 
-                int victim = cycle.front();
-                pid_t vpid = processTable[victim].pid;
-//log and kill
-                cout << "Deadlock detected, killing process " << vpid << "\n";
-                logFile << "Deadlock detected, killing process " << vpid << "\n";
-                kill(vpid, SIGKILL);
-//cleanup
-                for(int r = 0; r < MAX_RESOURCES; r++) {
-                    resources[r].available += processTable[victim].alloc[r];
-                    processTable[victim].alloc[r] = 0;
-                }
-                processTable[victim].occupied = 0;
-                waitingFor[victim] = -1;
-                running--;
-            }
-            lastDetect = now;
-        }
-    }
-
-  
-    cout << "Simulation complete.\n";
-    logFile << "Simulation complete.\n";
-    cleanup(0);
-    return 0;
 }
+//cleanup
+if(now - lastPrint >= 1000000000LL){
+	printMemoryMap();
+	printProcessTable();
+	lastPrint = now;
+}
+}
+
+cleanup(0);
+return 0;
+
+}
+
