@@ -39,7 +39,7 @@ struct Message{
 //logic for shared memory
 int main(){
 //shared memory key
-key_t shmKey= 6321;
+key_t key= 6321;
 
 //access to shared memory
 int shmid = shmget(key, sizeof(ClockDigi), 0666);

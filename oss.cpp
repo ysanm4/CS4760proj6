@@ -102,6 +102,7 @@ void advanceClock(long long deltaNs){
 	clockVal->sysClockNano = total % 1000000000LL;
 }
 
+//first fit
 int allocateFrame(pid_t pid, int page){
 	for(int i=0; i < FRAME_COUNT; i++){
 		if(!frameTable[i].occupied){
@@ -121,7 +122,7 @@ int allocateFrame(pid_t pid, int page){
 int lruIdx = 0;
 long long lruTime = (long long) frameTable[0].lastRfSec * 1000000000LL + frameTable[0].lastRefNano;
 for(int i = 1; i < FRAME_COUNT; i++){
-       long long t = (long long) frameTable[i].lastRfSec * 10000000000LL + frameTable[i].lastRefNano;
+       long long t = (long long) frameTable[i].lastRfSec * 1000000000LL + frameTable[i].lastRefNano;
 	if(t < lruTime){
 	 lruTime = t;
 	 lruIdx = i;
@@ -205,20 +206,20 @@ void printProcessTable(){
 	logFile << "Entry\tOccupied\tPID\tStartS\tStartN\tAccesses\tFaults\n";
     for (int i = 0; i < PROCESS_TABLE; i++) {
 	    if(processTable[i].occupied){
-		    auto &p = processTable[i];
+//		    auto &p = processTable[i];
         cout << i << "\t" 
 	     << processTable[i].occupied << "\t\t"
              << processTable[i].pid << "\t"
              << processTable[i].startSeconds << "\t"
              << processTable[i].startNano << "\t"
-             << processTable[i].accesses << "\n";
+             << processTable[i].accesses << "\t"
 	     << processTable[i].faults << "\n";
         logFile << i << "\t" 
 		<< processTable[i].occupied << "\t\t"
                 << processTable[i].pid << "\t"
                 << processTable[i].startSeconds << "\t"
                 << processTable[i].startNano << "\t"
-                << processTable[i].accesses << "\n";
+                << processTable[i].accesses << "\t"
 		<< processTable[i].faults << "\n";
     cout << "\n";
     logFile << "\n";
@@ -369,9 +370,8 @@ while(launched < n_case || running > 0){
 				pid,
 				clockVal->sysClockS,
 				clockVal->sysClockNano,
-				0,0.
-				{
-				}
+				0,0,
+				{0}
 			};
 			launched++;
 			running++;
