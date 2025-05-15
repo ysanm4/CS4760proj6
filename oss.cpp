@@ -16,6 +16,7 @@
 #include <ctime>
 #include <string>
 #include <vector>
+#include <queue>
 #include <sys/msg.h>
 #include <algorithm>
 
@@ -85,7 +86,7 @@ struct Fault{
 
 static PCB processTable[PROCESS_TABLE];
 static Frame frameTable[FRAME_COUNT];
-static sigqueue<Fault> faultQueue;
+static queue<Fault> faultQueue;
 //clock ID
 static int shmid;
 //shared memory ptr
@@ -102,7 +103,7 @@ void advanceClock(long long deltaNs){
 }
 
 int allocateFrame(pid_t pid, int page){
-	for(int i=0; i<FRAME_COUNT; i++){
+	for(int i=0; i < FRAME_COUNT; i++){
 		if(!frameTable[i].occupied){
 			frameTable[i] ={
 				true,
@@ -119,7 +120,7 @@ int allocateFrame(pid_t pid, int page){
 //LRU	
 int lruIdx = 0;
 long long lruTime = (long long) frameTable[0].lastRfSec * 1000000000LL + frameTable[0].lastRefNano;
-for(int i = 1; i<FRAME_COUNT; i++){
+for(int i = 1; i < FRAME_COUNT; i++){
        long long t = (long long) frameTable[i].lastRfSec * 10000000000LL + frameTable[i].lastRefNano;
 	if(t < lruTime){
 	 lruTime = t;
@@ -131,9 +132,14 @@ Frame victim = frameTable[lruIdx];
 //dirty bit
 long long extra = victim.dirty ? DISK_TIME_NS : 0;
 
-cout<< "oss: claring fram" << lruIdx << "of Pid" << victim.pid<< "page" << victim.page <<"\n";
-logFile<< "oss: claring fram" << lruIdx << "of Pid" << victim.pid<< "page" << victim.page <<"\n";
+cout<< "oss: claring fram" << lruIdx 
+<< "of Pid" << victim.pid
+<< "page" << victim.page <<"\n";
+logFile<< "oss: claring fram" << lruIdx 
+<< "of Pid" << victim.pid
+<< "page" << victim.page <<"\n";
 advanceClock(DISK_TIME_NS + extra);
+
 for( auto &p: processTable){
 	if(p.occupied && p.pid == victim.pid){
 		p.pageTable[victim.page] = -1;
@@ -154,14 +160,28 @@ return lruIdx;
 
 //frame/process table
 void printMemoryMap(){
-	cout<< "Memory map" << clockVal->sysClockS << ":" << clockVal->sysClockNano <<"\n";
-       	logFile<< "Memory map" << clockVal->sysClockS << ":" << clockVal->sysClockNano <<"\n";
+	cout<< "Memory map" << clockVal->sysClockS << ":" 
+		<< clockVal->sysClockNano <<"\n";
+       	logFile<< "Memory map" << clockVal->sysClockS << ":" 
+		<< clockVal->sysClockNano <<"\n";
 	cout<< "Frame num of dirty pid\n";
 	logFile<< "Frame num of dirty pid\n";
-	for(int i = 0; FRAME_COUNT; i++){
-		cout<< i <<" "<< (frameTable[i].occupied?"y":"n")<<" "<<(frameTable[i].dirty?"1":"0")<<" "
-			<<frameTable[i].lastRfSec<<" "<<frameTable[i].lastRefNano<<" "
-			<<frameTable[i].pid<<" "<<frameTable[i].page<<"\n";
+
+	for(int i = 0; i < FRAME_COUNT; i++){
+		cout<< i <<" "
+			<<(frameTable[i].occupied?"y":"n")<<" "
+			<<(frameTable[i].dirty?"1":"0")<<" "
+			<<frameTable[i].lastRfSec<<" "
+			<<frameTable[i].lastRefNano<<" "
+			<<frameTable[i].pid<<" "
+			<<frameTable[i].page<<"\n";
+		logFile<< i <<" "
+                        <<(frameTable[i].occupied?"y":"n")<<" "
+                        <<(frameTable[i].dirty?"1":"0")<<" "
+                        <<frameTable[i].lastRfSec<<" "
+                        <<frameTable[i].lastRefNano<<" "
+                        <<frameTable[i].pid<<" "
+                        <<frameTable[i].page<<"\n";
 	}
 
 	for(int i = 0; i<PROCESS_TABLE; i++){
@@ -184,14 +204,17 @@ void printProcessTable(){
 	logFile<<"Process Table::-------------------------------------------------------------------------------\n";
 	logFile << "Entry\tOccupied\tPID\tStartS\tStartN\tAccesses\tFaults\n";
     for (int i = 0; i < PROCESS_TABLE; i++) {
-	    if(!processTable[i].occupied){
-        cout << i << "\t" << processTable[i].occupied << "\t\t"
+	    if(processTable[i].occupied){
+		    auto &p = processTable[i];
+        cout << i << "\t" 
+	     << processTable[i].occupied << "\t\t"
              << processTable[i].pid << "\t"
              << processTable[i].startSeconds << "\t"
              << processTable[i].startNano << "\t"
              << processTable[i].accesses << "\n";
 	     << processTable[i].faults << "\n";
-        logFile << i << "\t" << processTable[i].occupied << "\t\t"
+        logFile << i << "\t" 
+		<< processTable[i].occupied << "\t\t"
                 << processTable[i].pid << "\t"
                 << processTable[i].startSeconds << "\t"
                 << processTable[i].startNano << "\t"
@@ -404,8 +427,8 @@ while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT
 				msgsnd(msgid, &ack, sizeof(ack) - sizeof(long),0);
 			}else{
 				p.faults++;
-				faultQueue.push({
-						msg,pid,
+				faultQueue.push(Fault{
+						msg.pid,
 						page,
 						msg.write,
 						clockVal->sysClockS,
