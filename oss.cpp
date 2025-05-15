@@ -43,7 +43,7 @@ enum MsgType {
 
 //struct for PCB
 struct PCB{
-	BOOL occupied;
+	bool occupied;
 	pid_t pid;
 	int startSeconds;
 	int startNano;
@@ -85,7 +85,7 @@ struct Fault{
 
 static PCB processTable[PROCESS_TABLE];
 static Frame frameTable[FRAME_COUNT];
-static queue<Fault> faultQueue;
+static sigqueue<Fault> faultQueue;
 //clock ID
 static int shmid;
 //shared memory ptr
@@ -103,7 +103,7 @@ void advanceClock(long long deltaNs){
 
 int allocateFrame(pid_t pid, int page){
 	for(int i=0; i<FRAME_COUNT; i++){
-		if(!frameTabel[i].occupied){
+		if(!frameTable[i].occupied){
 			frameTable[i] ={
 				true,
 				pid,
@@ -112,15 +112,15 @@ int allocateFrame(pid_t pid, int page){
 				clockVal->sysClockS,
 				clockVal->sysClockNano
 			};
-			returni;
+			return i;
 		}
 	}
 
 //LRU	
 int lruIdx = 0;
-long long lruTime = (long long) frameTable[0].lastRefSec * 1000000000LL + frameTable[0].lastRefNano;
-for(int i = 1; <FRAME_COUNT; i++){
-       long long t = (long long) frameTable[i].lastRefSec * 10000000000LL + frameTable[i].lastRefNano;
+long long lruTime = (long long) frameTable[0].lastRfSec * 1000000000LL + frameTable[0].lastRefNano;
+for(int i = 1; i<FRAME_COUNT; i++){
+       long long t = (long long) frameTable[i].lastRfSec * 10000000000LL + frameTable[i].lastRefNano;
 	if(t < lruTime){
 	 lruTime = t;
 	 lruIdx = i;
@@ -160,7 +160,7 @@ void printMemoryMap(){
 	logFile<< "Frame num of dirty pid\n";
 	for(int i = 0; FRAME_COUNT; i++){
 		cout<< i <<" "<< (frameTable[i].occupied?"y":"n")<<" "<<(frameTable[i].dirty?"1":"0")<<" "
-			<<frameTable[i].lastRefSec<<" "<<frameTable[i].lastRefNano<<" "
+			<<frameTable[i].lastRfSec<<" "<<frameTable[i].lastRefNano<<" "
 			<<frameTable[i].pid<<" "<<frameTable[i].page<<"\n";
 	}
 
@@ -320,7 +320,7 @@ while(launched < n_case || running > 0){
 //free
                 for(int k = 0; k < PROCESS_TABLE; k++) {
 			if(processTable[k].occupied && processTable[k].pid == pid){
-				long long totalTime = now - ((long long)processTable[k].startSec * 1000000000LL + processTable[k].startNano);
+				long long totalTime = now - ((long long)processTable[k].startSeconds * 1000000000LL + processTable[k].startNano);
 				cout<< "pid" << pid << "done runnitime = " << totalTime << " ns accesses = " << processTable[k].accesses << " faults = " << processTable[k].faults << "\n";
 				logFile<< "pid" << pid << "done runnitime = " << totalTime << " ns accesses = " << processTable[k].accesses << " faults = " << processTable[k].faults << "\n";
 				
@@ -352,7 +352,7 @@ while(launched < n_case || running > 0){
 			};
 			launched++;
 			running++;
-			lastLaunched= now;
+			lastLaunch = now;
                         break;
                     }
                 }
@@ -362,7 +362,7 @@ while(launched < n_case || running > 0){
 	if(!faultQueue.empty()){
 		Fault f = faultQueue.front();
 		long long elapsed = now - ((long long) f.reqSec * 1000000000LL + f.reqNano);
-		if(elapsed >= DISK_TIME_NS + (frameTable[f.pif % FRAME_COUNT].dirty? DISK_TIME_NS:0)){
+		if(elapsed >= DISK_TIME_NS + (frameTable[f.pid % FRAME_COUNT].dirty? DISK_TIME_NS:0)){
 			faultQueue.pop();
 			int frameIdx = allocateFrame(f.pid, f.page);
 			for(auto &p : processTable){
@@ -391,7 +391,7 @@ while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT
 			int page = msg.address / PAGE_SIZE;
 			int frm = p.pageTable[page];
 			if(frm >= 0){
-				frameTable[frm].lastRefSec = clockVal->sysClockS;
+				frameTable[frm].lastRfSec = clockVal->sysClockS;
 				frameTable[frm].lastRefNano = clockVal->sysClockNano;
 				if(msg.write) frameTable[frm].dirty = true;
 				advanceClock(100);
