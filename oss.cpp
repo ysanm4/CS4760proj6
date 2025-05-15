@@ -327,17 +327,34 @@ shmid = shmget(key, sizeof(ClockDigi), IPC_CREAT | 0666);
     signal(SIGALRM, cleanup);
     alarm(5);
 
-    for(int j=0;j<PROCESS_TABLE;j++) processTable[j] = {false,0,0,0,0,{}};
-    for(int j=0;j<FRAME_COUNT;j++) frameTable[j] = {false,0,0,false,0,0};
+    for (int j = 0; j < PROCESS_TABLE; j++) {
+        processTable[j].occupied     = false;
+        processTable[j].pid          = 0;
+        processTable[j].startSeconds = 0;
+        processTable[j].startNano    = 0;
+        processTable[j].accesses     = 0;
+        processTable[j].faults       = 0;
+        for (int pg = 0; pg < PAGES_PER_PROCESS; pg++) {
+            processTable[j].pageTable[pg] = -1; 
+        }
+    }
+    
 
+    // initialize frame table
+    for (int j = 0; j < FRAME_COUNT; j++) {
+        frameTable[j] = { false, 0, 0, false, 0, 0 };
+    }
 
     int launched = 0;
     int running = 0;
     long long lastLaunch = 0;
     long long lastPrint = 0; 
 
+const long long incNs = 10LL * 1000000LL;
+
 //main loop
 while(launched < n_case || running > 0){
+	advanceClock(incNs);
     long long now = (long long)clockVal->sysClockS * 1000000000LL + clockVal->sysClockNano;
 	pid_t pid;
         while((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
@@ -363,16 +380,17 @@ while(launched < n_case || running > 0){
                 perror("exec"); exit(1);
             } else {
 //register pcb
-                for(int k = 0; k < PROCESS_TABLE; k++) {
-                    if(!processTable[k].occupied) {
-                        processTable[k] = {
-				true,
-				pid,
-				clockVal->sysClockS,
-				clockVal->sysClockNano,
-				0,0,
-				{0}
-			};
+                for (int k = 0; k < PROCESS_TABLE; k++) {
+                    if (!processTable[k].occupied) {
+                        processTable[k].occupied     = true;
+                        processTable[k].pid          = pid;
+                        processTable[k].startSeconds = clockVal->sysClockS;
+                        processTable[k].startNano    = clockVal->sysClockNano;
+                        processTable[k].accesses     = 0;
+                        processTable[k].faults       = 0;
+                        for (int pg = 0; pg < PAGES_PER_PROCESS; pg++) {
+                            processTable[k].pageTable[pg] = -1; 
+                        }
 			launched++;
 			running++;
 			lastLaunch = now;
@@ -408,12 +426,39 @@ while(launched < n_case || running > 0){
 //message handleing
 Message msg;
 while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT) > 0){
-	for(auto &p : processTable){
-		if(p.occupied && p.pid == msg.pid){
-			p.accesses++;
-			int page = msg.address / PAGE_SIZE;
-			int frm = p.pageTable[page];
+//	for(auto &p : processTable){
+//		if(p.occupied && p.pid == msg.pid){
+//			p.accesses++;
+//			int page = msg.address / PAGE_SIZE;
+//			int frm = p.pageTable[page];
+
+	cout << "oss: P" << msg.pid
+             << (msg.write ? " requesting write of address " : " requesting read of address ")
+             << msg.address
+             << " at time " << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+        logFile << "oss: P" << msg.pid
+                << (msg.write ? " requesting write of address " : " requesting read of address ")
+                << msg.address
+                << " at time " << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+
+        for (auto &p : processTable) {
+            if (p.occupied && p.pid == msg.pid) {
+                p.accesses++;
+                int page = msg.address / PAGE_SIZE;
+                int frm  = p.pageTable[page];
 			if(frm >= 0){
+	cout << "oss: Address " << msg.address
+                         << " in frame " << frm
+                         << (msg.write ? ", writing" : ", giving data")
+                         << " to P" << msg.pid
+                         << " at time " << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+                    logFile << "oss: Address " << msg.address
+                            << " in frame " << frm
+                            << (msg.write ? ", writing" : ", giving data")
+                            << " to P" << msg.pid
+                            << " at time " << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+
+
 				frameTable[frm].lastRfSec = clockVal->sysClockS;
 				frameTable[frm].lastRefNano = clockVal->sysClockNano;
 				if(msg.write) frameTable[frm].dirty = true;
@@ -426,6 +471,15 @@ while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT
 				};
 				msgsnd(msgid, &ack, sizeof(ack) - sizeof(long),0);
 			}else{
+
+
+			cout << "oss: Address " << msg.address
+                         << " not in a frame, pagefault at time "
+                         << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+                    logFile << "oss: Address " << msg.address
+                            << " not in a frame, pagefault at time "
+                            << clockVal->sysClockS << ":" << clockVal->sysClockNano << "\n";
+
 				p.faults++;
 				faultQueue.push(Fault{
 						msg.pid,
