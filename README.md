@@ -1,4 +1,4 @@
-This is the README for project 5 made by Yosef Alqufidi
+This is the README for project 6 made by Yosef Alqufidi
 
 How to run this project:
 
@@ -12,4 +12,4 @@ Step 3, Running oss file with other parameters: Now you can try running oss by r
 
 Step 4, Checking logfile: Make sure to open logfile to check it's contents. Keep in mind if you just run ./oss with no parameter inputs, the log file will be named ossLog.txt.
 
-Check GitHub link for version control: https://github.com/ysanm4/CS4760proj5
+Check GitHub link for version control: https://github.com/ysanm4/CS4760proj6

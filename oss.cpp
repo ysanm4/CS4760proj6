@@ -426,11 +426,7 @@ while(launched < n_case || running > 0){
 //message handleing
 Message msg;
 while(msgrcv(msgid, &msg, sizeof(msg) - sizeof(long), REQUEST_MEMORY, IPC_NOWAIT) > 0){
-//	for(auto &p : processTable){
-//		if(p.occupied && p.pid == msg.pid){
-//			p.accesses++;
-//			int page = msg.address / PAGE_SIZE;
-//			int frm = p.pageTable[page];
+
 
 	cout << "oss: P" << msg.pid
              << (msg.write ? " requesting write of address " : " requesting read of address ")
